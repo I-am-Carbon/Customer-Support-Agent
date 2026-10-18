@@ -11,7 +11,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, AIMessage
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
+from db import make_checkpointer
 from tools import ORDER_TOOLS, REFUND_TOOLS
 
 llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0)
@@ -92,4 +92,5 @@ builder.add_conditional_edges("refund_agent", lambda s: needs_tools(s, "refund_t
 builder.add_conditional_edges("order_tools", after_order_tools, ["order_agent", "refund_agent"])
 builder.add_edge("refund_tools", "refund_agent")
 
-graph = builder.compile(checkpointer=MemorySaver())
+checkpointer = make_checkpointer()   # conversations + pending approvals live in Postgres
+graph = builder.compile(checkpointer=checkpointer)

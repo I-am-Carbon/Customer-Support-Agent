@@ -1,2 +1,6 @@
 langgraph
 langchain-groq
+langgraph-checkpoint-postgres
+sqlalchemy
+psycopg[binary]
+psycopg-pool

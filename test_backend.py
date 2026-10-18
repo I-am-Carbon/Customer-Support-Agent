@@ -1,5 +1,9 @@
-"""Policy tests. No LLM, no API key needed. Run: python test_backend.py"""
+"""Policy tests against Postgres (DATABASE_URL). No LLM needed. Run: python test_backend.py
+WARNING: resets the orders/refunds tables."""
 import backend
+import db
+
+db.reset_db()
 
 # ---------- refund policy (u1 owns 101 and 102, u2 owns 103) ----------
 assert backend.check_refund_eligibility("101", "u1")["result"] == "eligible"         # delivered, small
@@ -12,13 +16,16 @@ assert "error" in backend.update_address("101", "Delhi", "u1")                  
 assert backend.get_order("101", "u1")["item"] == "Headphones"
 assert backend.get_order("103", "u1") == backend.get_order("999", "u1") == {"error": "order not found"}
 assert backend.update_address("103", "Delhi", "u1") == {"error": "order not found"}
-assert backend.ORDERS["103"]["address"] == "Chennai"                                 # unchanged
+assert backend.get_order("103", "u2")["address"] == "Chennai"                        # unchanged
 assert backend.check_refund_eligibility("101", "u2") == {"result": "not_eligible", "reason": "order not found"}
 assert backend.issue_refund("101", "u2") == {"error": "order not found"}             # even skipping the check
-assert backend.REFUNDS == []                                                         # no money moved
+assert backend.refunded_order_ids() == []                                            # no money moved
 assert backend.update_address("102", "Mysore", "u1")["ok"]                           # owner still can
 
 # ---------- no double refunds ----------
-backend.issue_refund("101", "u1")
+assert backend.issue_refund("101", "u1")["ok"]
 assert backend.check_refund_eligibility("101", "u1")["result"] == "not_eligible"
+# Even skipping the eligibility check, the primary key on refunds.order_id blocks a second payout.
+assert backend.issue_refund("101", "u1") == {"error": "already refunded"}
+assert backend.refunded_order_ids() == ["101"]
 print("All policy tests passed.")

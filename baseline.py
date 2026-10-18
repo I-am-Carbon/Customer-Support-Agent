@@ -7,8 +7,7 @@ No triage, no handoff. Same model, same backend, same policy-enforcing tools.
 from langchain_core.messages import SystemMessage
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
-from graph import llm
+from graph import llm, checkpointer   # same model, same Postgres checkpointer
 from tools import get_order, update_address, request_refund
 
 ALL_TOOLS = [get_order, update_address, request_refund]
@@ -34,4 +33,4 @@ builder.add_edge(START, "agent")
 builder.add_conditional_edges("agent", needs_tools, ["tools", END])
 builder.add_edge("tools", "agent")
 
-graph = builder.compile(checkpointer=MemorySaver())
+graph = builder.compile(checkpointer=checkpointer)

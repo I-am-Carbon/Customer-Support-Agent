@@ -2,6 +2,7 @@
 End-to-end scenarios: scripted customer conversations with expected outcomes,
 run against the multi-agent graph AND the single-agent baseline. Uses the real LLM.
 Run from the project root: python -m tests.scenarios
+WARNING: resets the orders/refunds tables in DATABASE_URL before every scenario.
 
 Each scenario expects:
   agent    - which agent handles the last turn (multi-agent only): order / refund / other
@@ -15,13 +16,14 @@ Orders: u1 owns 101 (Rs 2000, delivered), 102 (Rs 60000, 19 days in transit),
         105 (Rs 1200, 14 days in transit). u2 owns 103 (Rs 800, 3 days in transit),
         104 (Rs 9000, delivered).
 """
-import copy
 import time
+import uuid
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
 import backend
 import baseline
+import db
 import graph as multi
 
 SCENARIOS = [
@@ -64,12 +66,7 @@ SCENARIOS = [
 
 SYSTEMS = {"multi": multi.graph, "single": baseline.graph}
 
-INITIAL_ORDERS = copy.deepcopy(backend.ORDERS)
-
-def reset_backend():
-    backend.ORDERS.clear()
-    backend.ORDERS.update(copy.deepcopy(INITIAL_ORDERS))
-    backend.REFUNDS.clear()
+RUN_ID = uuid.uuid4().hex[:8]   # checkpoints persist in Postgres, so each run needs fresh thread ids
 
 
 class CountLLMCalls(BaseCallbackHandler):
@@ -81,10 +78,10 @@ class CountLLMCalls(BaseCallbackHandler):
 
 def run(system: str, s: dict) -> dict:
     """Play one scenario against one system and record what actually happened."""
-    reset_backend()
+    db.reset_db()
     app = SYSTEMS[system]
     counter = CountLLMCalls()
-    config = {"configurable": {"thread_id": f"{system}-{s['name']}", "user_id": s["user"]},
+    config = {"configurable": {"thread_id": f"{RUN_ID}-{system}-{s['name']}", "user_id": s["user"]},
               "callbacks": [counter]}
     approval, error = False, None
     start = time.perf_counter()
@@ -100,8 +97,9 @@ def run(system: str, s: dict) -> dict:
     state = app.get_state(config).values
     refund_called = any(isinstance(m, ToolMessage) and m.name == "request_refund"
                         for m in state.get("messages", []))
-    if backend.REFUNDS:
-        refund = "issued" if len(backend.REFUNDS) == 1 else f"issued x{len(backend.REFUNDS)}"
+    refunds = backend.refunded_order_ids()
+    if refunds:
+        refund = "issued" if len(refunds) == 1 else f"issued x{len(refunds)}"
     else:
         refund = "denied" if refund_called else None
     return {"agent": state.get("active_agent", "-"), "refund": refund, "approval": approval,

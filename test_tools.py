@@ -1,9 +1,13 @@
-"""Ownership at the tool layer. No LLM, no API key needed. Run: python test_tools.py"""
+"""Ownership at the tool layer, against Postgres (DATABASE_URL). No LLM needed.
+Run: python test_tools.py   WARNING: resets the orders/refunds tables."""
 from langchain_core.messages import AIMessage
 from langgraph.graph import StateGraph, MessagesState, START
 from langgraph.prebuilt import ToolNode
 import backend
+import db
 import tools
+
+db.reset_db()
 
 u1 = {"configurable": {"user_id": "u1"}}
 u2 = {"configurable": {"user_id": "u2"}}
@@ -17,7 +21,7 @@ assert tools.get_order.invoke({"order_id": "101"}, config=u1)["item"] == "Headph
 assert tools.get_order.invoke({"order_id": "101"}, config=u2) == {"error": "order not found"}
 assert tools.request_refund.invoke({"order_id": "101", "reason": "broken"}, config=u2) == \
     "Refund denied: order not found."
-assert backend.REFUNDS == []
+assert backend.refunded_order_ids() == []
 
 # No logged-in user -> no access (fail closed).
 try:
@@ -37,7 +41,7 @@ def run_tool_call(name, args, config):
     return tool_graph.invoke({"messages": [call]}, config)["messages"][-1].content
 
 assert run_tool_call("request_refund", {"order_id": "101", "reason": "x"}, u2) == "Refund denied: order not found."
-assert backend.REFUNDS == []
+assert backend.refunded_order_ids() == []
 assert run_tool_call("request_refund", {"order_id": "101", "reason": "x"}, u1) == "Refund of Rs 2000 issued for order 101."
-assert backend.REFUNDS == ["101"]
+assert backend.refunded_order_ids() == ["101"]
 print("All tool ownership tests passed.")
