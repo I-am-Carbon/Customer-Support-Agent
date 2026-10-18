@@ -1,10 +1,14 @@
-"""Chat with the support system in the terminal. You also play the human reviewer."""
+"""Chat with the support system in the terminal. You also play the human reviewer.
+Run: python run.py [user_id]   (default u1; try u2 to see ownership checks)"""
+import sys
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 from graph import graph
 
-config = {"configurable": {"thread_id": "demo"}}   # one thread = one conversation
-print("Support chat. Type 'quit' to exit.\n")
+user_id = sys.argv[1] if len(sys.argv) > 1 else "u1"   # stands in for a real login
+# One thread = one conversation. user_id rides along in config so every tool can read it.
+config = {"configurable": {"thread_id": f"demo-{user_id}", "user_id": user_id}}
+print(f"Support chat as {user_id}. Type 'quit' to exit.\n")
 
 while True:
     text = input("You: ").strip()

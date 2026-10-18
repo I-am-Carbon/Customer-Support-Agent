@@ -18,15 +18,24 @@ AUTO_APPROVE_LIMIT = 5000   # refunds above this need a human
 MIN_DELAY_DAYS = 7          # in-transit orders become refundable after this many days
 
 
-def get_order(order_id: str) -> dict:
+def _find_order(order_id: str, user_id: str) -> dict | None:
+    """The order, but only if it belongs to this user.
+    Someone else's order looks exactly like a missing one, so ids can't be probed."""
     order = ORDERS.get(order_id)
+    if order is None or order["user"] != user_id:
+        return None
+    return order
+
+
+def get_order(order_id: str, user_id: str) -> dict:
+    order = _find_order(order_id, user_id)
     if order is None:
         return {"error": "order not found"}
     return {"order_id": order_id, **order, "ordered": str(order["ordered"])}
 
 
-def update_address(order_id: str, new_address: str) -> dict:
-    order = ORDERS.get(order_id)
+def update_address(order_id: str, new_address: str, user_id: str) -> dict:
+    order = _find_order(order_id, user_id)
     if order is None:
         return {"error": "order not found"}
     if order["status"] == "delivered":
@@ -35,8 +44,8 @@ def update_address(order_id: str, new_address: str) -> dict:
     return {"ok": True, "order_id": order_id, "address": new_address}
 
 
-def check_refund_eligibility(order_id: str, today: date = TODAY) -> dict:
-    order = ORDERS.get(order_id)
+def check_refund_eligibility(order_id: str, user_id: str, today: date = TODAY) -> dict:
+    order = _find_order(order_id, user_id)
     if order is None:
         return {"result": "not_eligible", "reason": "order not found"}
     if order_id in REFUNDS:
@@ -49,6 +58,9 @@ def check_refund_eligibility(order_id: str, today: date = TODAY) -> dict:
     return {"result": "eligible", "amount": order["amount"]}
 
 
-def issue_refund(order_id: str) -> dict:
+def issue_refund(order_id: str, user_id: str) -> dict:
+    # Checked again here so money can't move even if a caller skips the eligibility check.
+    if _find_order(order_id, user_id) is None:
+        return {"error": "order not found"}
     REFUNDS.append(order_id)
     return {"ok": True, "order_id": order_id, "amount": ORDERS[order_id]["amount"]}
