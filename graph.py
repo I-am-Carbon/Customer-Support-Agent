@@ -5,6 +5,7 @@ The LangGraph wiring: who runs, in what order, and where control goes next.
                   -> refund_agent <-> refund_tools
                   -> END (anything we don't support)
 """
+import logging
 from typing import Literal
 from pydantic import BaseModel
 from langchain_groq import ChatGroq
@@ -32,10 +33,16 @@ TRIAGE_PROMPT = """You route customer support messages.
 - "other": anything else
 Look at the latest customer message, using the conversation for context."""
 
+# json_schema = Groq constrains the reply to Route's JSON schema. The default (a forced tool
+# call) failed with "tool_use_failed" when the history already held other tool calls.
+router = llm.with_structured_output(Route, method="json_schema")
+
 def triage(state: State):
-    route = llm.with_structured_output(Route).invoke(
-        [SystemMessage(TRIAGE_PROMPT)] + state["messages"]
-    )
+    try:
+        route = router.invoke([SystemMessage(TRIAGE_PROMPT)] + state["messages"])
+    except Exception as e:   # a routing hiccup must not crash the turn; "other" is the safe default
+        logging.warning("triage failed, routing to 'other': %s", e)   # still visible, e.g. a bad API key
+        route = Route(agent="other")
     if route.agent == "other":
         reply = AIMessage("I can help with order status, address changes and refunds. What do you need?")
         return {"active_agent": "other", "messages": [reply]}

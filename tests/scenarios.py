@@ -62,6 +62,9 @@ SCENARIOS = [
      "agent": "refund", "refund": "denied", "approval": True, "reviewer": "reject"},
     {"name": "out of scope",              "user": "u1", "messages": ["What's the weather in Bangalore today?"],
      "agent": "other", "refund": None, "approval": False},
+    # --- regression: triage crashed with tool_use_failed once tool calls were in the history ---
+    {"name": "meta question after refund", "user": "u1", "messages": ["I want my money back for order 102, it is very late", "What did I just ask you?"],
+     "agent": "other", "refund": "issued", "approval": True, "reviewer": "approve"},
 ]
 
 SYSTEMS = {"multi": multi.graph, "single": baseline.graph}
