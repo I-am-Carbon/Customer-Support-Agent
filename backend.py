@@ -11,6 +11,8 @@ ORDERS = {
     "101": {"user": "u1", "item": "Headphones", "amount": 2000, "status": "delivered",  "ordered": date(2026, 9, 20), "address": "Bangalore"},
     "102": {"user": "u1", "item": "Laptop",     "amount": 60000, "status": "in_transit", "ordered": date(2026, 9, 15), "address": "Bangalore"},
     "103": {"user": "u2", "item": "Mouse",      "amount": 800,   "status": "in_transit", "ordered": date(2026, 10, 1), "address": "Chennai"},
+    "104": {"user": "u2", "item": "Phone",      "amount": 9000,  "status": "delivered",  "ordered": date(2026, 9, 25), "address": "Chennai"},
+    "105": {"user": "u1", "item": "Book",       "amount": 1200,  "status": "in_transit", "ordered": date(2026, 9, 20), "address": "Bangalore"},
 }
 REFUNDS = []   # order ids that have been refunded
 
