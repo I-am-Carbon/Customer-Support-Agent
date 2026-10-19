@@ -202,13 +202,8 @@ This is expected, because every safety rule is enforced in `backend.py` and the 
 neither architecture *can* break policy. Even the injection attempt still went to review.
 At this size, multi-agent doesn't buy accuracy. It buys **least privilege** (the order
 agent cannot call `request_refund`) and small, focused prompts. That matters more as tools and
-teams grow. Scenario 17 is a regression test for a real triage crash found in development
-(see NOTES.md, Step 4).
+teams grow. Scenario 17 is a regression test for a real triage crash found in development.
 
 LLMs are nondeterministic and 17 scenarios is a small sample. Earlier runs gave the same
 pass/fail results, but timings vary with Groq load.
 
-## Design notes
-
-`NOTES.md` has the reasoning behind each step: what was built, why, which alternatives were
-rejected, and the caveats.
