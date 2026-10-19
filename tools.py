@@ -55,7 +55,7 @@ def request_refund(order_id: str, reason: str, config: RunnableConfig) -> str:
         if decision != "approve":
             return "A human reviewer rejected this refund."
 
-    refund = backend.issue_refund(order_id, user_id)
+    refund = backend.issue_refund(order_id, user_id, approved=check["result"] == "needs_approval")
     if "error" in refund:
         return f"Refund denied: {refund['error']}."
     return f"Refund of Rs {refund['amount']} issued for order {order_id}."

@@ -41,6 +41,7 @@ class Order(Base):
     amount: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String)          # delivered / in_transit
     ordered: Mapped[date] = mapped_column(Date)
+    delivered_on: Mapped[date | None] = mapped_column(Date)   # None until delivered
     address: Mapped[str] = mapped_column(String)
 
 class Refund(Base):
@@ -83,11 +84,12 @@ class Notification(Base):
 
 
 SEED_ORDERS = [
-    dict(id="101", user_id="u1", item="Headphones", amount=2000,  status="delivered",  ordered=date(2026, 9, 20), address="Bangalore"),
-    dict(id="102", user_id="u1", item="Laptop",     amount=60000, status="in_transit", ordered=date(2026, 9, 15), address="Bangalore"),
-    dict(id="103", user_id="u2", item="Mouse",      amount=800,   status="in_transit", ordered=date(2026, 10, 1), address="Chennai"),
-    dict(id="104", user_id="u2", item="Phone",      amount=9000,  status="delivered",  ordered=date(2026, 9, 25), address="Chennai"),
-    dict(id="105", user_id="u1", item="Book",       amount=1200,  status="in_transit", ordered=date(2026, 9, 20), address="Bangalore"),
+    dict(id="101", user_id="u1", item="Headphones", amount=2000,  status="delivered",  ordered=date(2026, 9, 20), delivered_on=date(2026, 9, 27), address="Bangalore"),
+    dict(id="102", user_id="u1", item="Laptop",     amount=60000, status="in_transit", ordered=date(2026, 9, 15), delivered_on=None,              address="Bangalore"),
+    dict(id="103", user_id="u2", item="Mouse",      amount=800,   status="in_transit", ordered=date(2026, 10, 1), delivered_on=None,              address="Chennai"),
+    dict(id="104", user_id="u2", item="Phone",      amount=9000,  status="delivered",  ordered=date(2026, 9, 25), delivered_on=date(2026, 9, 29), address="Chennai"),
+    dict(id="105", user_id="u1", item="Book",       amount=1200,  status="in_transit", ordered=date(2026, 9, 20), delivered_on=None,              address="Bangalore"),
+    dict(id="106", user_id="u1", item="Shoes",      amount=3000,  status="delivered",  ordered=date(2026, 9, 1),  delivered_on=date(2026, 9, 5),  address="Bangalore"),
 ]
 
 def reset_db():
@@ -120,6 +122,12 @@ def init_db():
     Unlike reset_db(), never deletes anything."""
     Base.metadata.create_all(engine)
     with Session(engine) as s, s.begin():
+        # create_all never alters an existing table, so columns added later go here.
+        # (A real project would use Alembic migrations.)
+        s.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_on DATE"))
+        # Orders delivered before the column existed: use the order date (the window can only
+        # close earlier than the truth, never later).
+        s.execute(text("UPDATE orders SET delivered_on = ordered WHERE status = 'delivered' AND delivered_on IS NULL"))
         if s.query(Order).first() is None:
             s.add_all([Order(**row) for row in SEED_ORDERS])
         for table in Base.metadata.tables:

@@ -52,8 +52,8 @@ with chat_col:
         else:
             st.error(error_text(r))
 
-    st.caption("Seed orders: u1 has 101 (₹2,000), 102 (₹60,000), 105 (₹1,200); "
-               "u2 has 103 (₹800), 104 (₹9,000). Refunds over ₹5,000 need a reviewer.")
+    st.caption("Seed orders: u1 has 101 (₹2,000), 102 (₹60,000), 105 (₹1,200), 106 (₹3,000, past "
+               "the return window); u2 has 103 (₹800), 104 (₹9,000). Refunds over ₹5,000 need a reviewer.")
 
     history = st.container(height=420)
     for m in convo["messages"]:

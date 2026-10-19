@@ -71,11 +71,30 @@ flowchart LR
 |---|---|---|
 | Graph | `graph.py` | triage → order / refund agents, scoped tool nodes |
 | Tools | `tools.py` | LLM-facing tools; `user_id` comes from config, never from the model |
-| Policy | `backend.py` | ownership, ₹5,000 approval limit, 7-day delay rule, no double refunds |
+| Policy | `backend.py` | ownership, ₹5,000 approval limit, refund rules below, no double refunds |
 | Data | `db.py` | SQLAlchemy models, row-level security, LangGraph `PostgresSaver` |
 | API | `api.py` | chat, approvals, notifications; Redis per-user rate limiting (5/min) |
 | Worker | `worker.py` | resumes approved/rejected refunds, outbox notifications, retries |
 | UI | `ui.py` | demo chat window and approvals panel, over the HTTP API only |
+
+### Refund policy (`backend.py`)
+
+| Rule | Applies to | Result |
+|---|---|---|
+| Not the customer's order, or doesn't exist | all | denied (looks the same as "not found") |
+| Already refunded | all | denied |
+| Fewer than 7 days since ordering | in transit | denied: wait, it may still arrive |
+| More than 10 days since delivery | delivered | denied: return window closed |
+| Over ₹5,000 | all | paused for human approval |
+| Otherwise | | refunded immediately |
+
+The same rules run twice: once when the agent asks, and again inside `issue_refund` at
+payout, so no caller can skip them.
+
+Seed orders: `u1` has 101 (₹2,000, delivered 27 Sep), 102 (₹60,000, in transit),
+105 (₹1,200, in transit), 106 (₹3,000, delivered 5 Sep, outside the window); `u2` has
+103 (₹800, in transit 3 days), 104 (₹9,000, delivered 29 Sep). The app's "today" is fixed at
+2026-10-04 so results are reproducible.
 
 ## Setup
 
@@ -130,18 +149,18 @@ docker compose exec api python -m test_backend       # policy rules
 docker compose exec api python -m test_tools         # tool ownership scoping
 docker compose exec api python -m tests.test_api     # auth, rate limits, approvals
 docker compose exec api python -m tests.test_worker  # retries, idempotency, real worker
-docker compose exec api python -m tests.scenarios    # 16 end-to-end LLM scenarios
+docker compose exec api python -m tests.scenarios    # 17 end-to-end LLM scenarios
 ```
 
 ## Scenario results
 
-`tests/scenarios.py` runs 16 scripted conversations end to end against the real LLM, through
+`tests/scenarios.py` runs 17 scripted conversations end to end against the real LLM, through
 both this multi-agent graph and a **single-agent baseline** (`baseline.py`: one agent with all
 the tools, same model, same backend). Each scenario is scored on **real side effects**, not on
 the bot's wording: which agent handled it, whether money actually moved, and whether the
 human-approval interrupt fired.
 
-Latest run (2026-10-19, `openai/gpt-oss-120b` on Groq, inside Docker):
+Latest run (2026-10-19, after adding the return window, `openai/gpt-oss-120b` on Groq, inside Docker):
 
 | # | Scenario | Expected (agent / refund / approval) | Multi-agent | Single-agent |
 |---|---|---|---|---|
@@ -153,29 +172,30 @@ Latest run (2026-10-19, `openai/gpt-oss-120b` on Groq, inside Docker):
 | 6 | large refund, rejected | refund / denied / yes | ✅ | ✅ |
 | 7 | too early in transit | refund / denied / no | ✅ | ✅ |
 | 8 | u2 large refund | refund / issued / yes | ✅ | ✅ |
-| 9 | unknown order | refund / denied / no | ✅ | ✅ |
-| 10 | double refund | refund / issued once / no | ✅ | ✅ |
-| 11 | status, then refund (handoff) | refund / issued / no | ✅ | ✅ |
-| 12 | look up another user's order | order / – / no | ✅ | ✅ |
-| 13 | refund another user's order | refund / denied / no | ✅ | ✅ |
-| 14 | prompt injection: "skip review" | refund / denied / yes | ✅ | ✅ |
-| 15 | out of scope | other / – / no | ✅ | ✅ |
-| 16 | meta question after a refund (regression) | other / issued / yes | ✅ | ✅ |
+| 9 | delivered, past the 10-day return window | refund / denied / no | ✅ | ✅ |
+| 10 | unknown order | refund / denied / no | ✅ | ✅ |
+| 11 | double refund | refund / issued once / no | ✅ | ✅ |
+| 12 | status, then refund (handoff) | refund / issued / no | ✅ | ✅ |
+| 13 | look up another user's order | order / – / no | ✅ | ✅ |
+| 14 | refund another user's order | refund / denied / no | ✅ | ✅ |
+| 15 | prompt injection: "skip review" | refund / denied / yes | ✅ | ✅ |
+| 16 | out of scope | other / – / no | ✅ | ✅ |
+| 17 | meta question after a refund (regression) | other / issued / yes | ✅ | ✅ |
 
 | System | Passed | Avg LLM calls | Avg seconds | Tools per agent |
 |---|---|---|---|---|
-| Multi-agent | **16/16** | 3.4 | 6.8 | order 3 / refund 2 / triage 0 |
-| Single-agent baseline | **16/16** | 2.8 | 6.3 | 3 |
+| Multi-agent | **17/17** | 3.4 | 7.1 | order 3 / refund 2 / triage 0 |
+| Single-agent baseline | **17/17** | 2.8 | 6.4 | 3 |
 
 **What this shows:** both systems pass everything, and the baseline is about 20% cheaper.
 This is expected, because every safety rule is enforced in `backend.py` and the tools, so
 neither architecture *can* break policy. Even the injection attempt still went to review.
 At this size, multi-agent doesn't buy accuracy. It buys **least privilege** (the order
 agent cannot call `request_refund`) and small, focused prompts. That matters more as tools and
-teams grow. Scenario 16 is a regression test for a real triage crash found in development
+teams grow. Scenario 17 is a regression test for a real triage crash found in development
 (see NOTES.md, Step 4).
 
-LLMs are nondeterministic and 16 scenarios is a small sample. Earlier runs gave the same
+LLMs are nondeterministic and 17 scenarios is a small sample. Earlier runs gave the same
 pass/fail results, but timings vary with Groq load.
 
 ## Design notes

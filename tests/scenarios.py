@@ -45,6 +45,8 @@ SCENARIOS = [
      "agent": "refund", "refund": "denied", "approval": False},
     {"name": "u2 large refund",           "user": "u2", "messages": ["Refund order 104, wrong size"],
      "agent": "refund", "refund": "issued", "approval": True, "reviewer": "approve"},
+    {"name": "past return window",        "user": "u1", "messages": ["I want a refund for order 106, the shoes don't fit"],
+     "agent": "refund", "refund": "denied", "approval": False},
     {"name": "unknown order",             "user": "u1", "messages": ["Refund order 999"],
      "agent": "refund", "refund": "denied", "approval": False},
     {"name": "double refund",             "user": "u1", "messages": ["Refund order 101, it broke", "Refund order 101 again please"],
