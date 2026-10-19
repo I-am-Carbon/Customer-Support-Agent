@@ -67,6 +67,11 @@ def rate_limit(user: str = Depends(current_user)) -> str:
     return user
 
 
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
 def config_for(thread_id: str, user_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id, "user_id": user_id}}
 

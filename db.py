@@ -3,7 +3,8 @@ Database wiring: one Postgres for both the business data (SQLAlchemy) and
 LangGraph's conversation checkpoints (PostgresSaver). No business rules here.
 
 Connection string comes from the DATABASE_URL environment variable.
-Reset the data with: python db.py
+  python db.py init   create tables and seed if empty (safe; used by docker compose)
+  python db.py        wipe and reseed the business tables (tests do this)
 """
 import atexit
 import os
@@ -114,6 +115,23 @@ def make_checkpointer() -> PostgresSaver:
     return checkpointer
 
 
+def init_db():
+    """Safe on every start: create missing tables, seed only an empty DB, set up checkpoints.
+    Unlike reset_db(), never deletes anything."""
+    Base.metadata.create_all(engine)
+    with Session(engine) as s, s.begin():
+        if s.query(Order).first() is None:
+            s.add_all([Order(**row) for row in SEED_ORDERS])
+        for table in Base.metadata.tables:
+            s.execute(text(RLS.format(table)))
+    make_checkpointer()   # runs PostgresSaver.setup() once, before api and worker start
+
+
 if __name__ == "__main__":
-    reset_db()
-    print("Database reset with seed orders.")
+    import sys
+    if sys.argv[1:] == ["init"]:
+        init_db()
+        print("Database initialised.")
+    else:
+        reset_db()
+        print("Database reset with seed orders.")

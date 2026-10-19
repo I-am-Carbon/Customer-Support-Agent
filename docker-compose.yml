@@ -1,0 +1,67 @@
+# docker compose up --build   ->   API on http://localhost:8000 (docs at /docs)
+#
+# Needs GROQ_API_KEY in your shell environment or in a .env file next to this one.
+# Postgres and Redis run locally in containers; nothing here talks to Supabase or Upstash.
+#
+# Start order:  postgres + redis healthy -> init (tables, seed, checkpoints) -> api + worker
+
+x-app: &app
+  build: .
+  environment:
+    DATABASE_URL: postgresql://support:${POSTGRES_PASSWORD:-support}@postgres:5432/support
+    REDIS_URL: redis://redis:6379/0
+    GROQ_API_KEY: ${GROQ_API_KEY:?set GROQ_API_KEY in your environment or .env}
+    FAKE_NOTIFY_FAILURE_RATE: ${FAKE_NOTIFY_FAILURE_RATE:-0}
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: support
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-support}   # local dev only
+      POSTGRES_DB: support
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U support -d support"]
+      interval: 2s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  # One-off: create tables, seed an empty DB, set up checkpoint tables. Never wipes data.
+  init:
+    <<: *app
+    command: ["python", "db.py", "init"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: "no"
+
+  api:
+    <<: *app
+    ports:
+      - "8000:8000"
+    depends_on:
+      init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "worker", "worker", "--loglevel=info", "--concurrency=2"]
+    depends_on:
+      init: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
