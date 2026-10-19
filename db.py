@@ -50,6 +50,20 @@ class Refund(Base):
     amount: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+class Approval(Base):
+    """A refund paused at interrupt(), waiting for a human. Also the audit trail of who decided."""
+    __tablename__ = "approvals"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    thread_id: Mapped[str] = mapped_column(String)        # the paused conversation to resume
+    user_id: Mapped[str] = mapped_column(String)          # the customer (tools run as them on resume)
+    order_id: Mapped[str] = mapped_column(String)
+    amount: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending", index=True)   # pending / approved / rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_by: Mapped[str | None] = mapped_column(String)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 SEED_ORDERS = [
     dict(id="101", user_id="u1", item="Headphones", amount=2000,  status="delivered",  ordered=date(2026, 9, 20), address="Bangalore"),

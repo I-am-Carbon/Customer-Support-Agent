@@ -4,3 +4,7 @@ langgraph-checkpoint-postgres
 sqlalchemy
 psycopg[binary]
 psycopg-pool
+fastapi
+uvicorn
+redis
+httpx
