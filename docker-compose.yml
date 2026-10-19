@@ -1,9 +1,9 @@
-# docker compose up --build   ->   API on http://localhost:8000 (docs at /docs)
+# docker compose up --build   ->   UI on http://localhost:8501, API on http://localhost:8000 (docs at /docs)
 #
 # Needs GROQ_API_KEY in your shell environment or in a .env file next to this one.
 # Postgres and Redis run locally in containers; nothing here talks to Supabase or Upstash.
 #
-# Start order:  postgres + redis healthy -> init (tables, seed, checkpoints) -> api + worker
+# Start order:  postgres + redis healthy -> init (tables, seed, checkpoints) -> api + worker -> ui
 
 x-app: &app
   build: .
@@ -61,6 +61,18 @@ services:
     depends_on:
       init: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+    restart: unless-stopped
+
+  # Demo UI: talks to the API over HTTP only, never to Postgres or Redis.
+  ui:
+    build: .
+    command: ["streamlit", "run", "ui.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      api: { condition: service_healthy }
     restart: unless-stopped
 
 volumes:
