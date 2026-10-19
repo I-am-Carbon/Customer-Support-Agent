@@ -109,4 +109,14 @@ u1_notes = client.get("/notifications", headers=as_user("u1")).json()
 u2_notes = client.get("/notifications", headers=as_user("u2")).json()
 assert len(u1_notes) == 1 and "order 102" in u1_notes[0]["message"], u1_notes
 assert len(u2_notes) == 1 and "order 104" in u2_notes[0]["message"], u2_notes
+
+# Orders and refund history: own data only, with how each refund was decided.
+assert client.get("/orders").status_code == 401 and client.get("/refunds").status_code == 401
+u1_orders = client.get("/orders", headers=as_user("u1")).json()
+assert {o["order_id"] for o in u1_orders} == {"101", "102", "105", "106"}
+assert [o["order_id"] for o in u1_orders if o["refunded_at"]] == ["102"]
+u1_refunds = client.get("/refunds", headers=as_user("u1")).json()
+assert [(h["order_id"], h["status"], h["detail"]) for h in u1_refunds] == [("102", "refunded", "approved by admin")]
+u2_refunds = client.get("/refunds", headers=as_user("u2")).json()
+assert [(h["order_id"], h["status"], h["detail"]) for h in u2_refunds] == [("104", "rejected", "rejected by admin")]
 print("approval flow tests passed.")

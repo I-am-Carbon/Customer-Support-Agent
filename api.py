@@ -6,6 +6,8 @@ HTTP API around the multi-agent graph.
   POST /approvals/{id}    a reviewer approves or rejects; the Celery worker resumes the
                           paused graph (pays out on approve) and notifies the customer
   GET  /notifications     a customer reads their notifications
+  GET  /orders            a customer's orders, with refund status
+  GET  /refunds           a customer's refund history (paid, pending, rejected)
 
 Auth is a stand-in: the X-User-Id header. In production it comes from a verified
 session or JWT, never from something the client can set freely.
@@ -23,6 +25,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
+import backend
 from db import Approval, Notification, engine
 from graph import graph
 from worker import process_decision
@@ -148,6 +151,17 @@ def decide(approval_id: str, body: DecisionIn, reviewer_id: str = Depends(review
         raise HTTPException(503, "could not queue the decision, try again")
 
     return {"id": approval_id, "status": status, "job_status": "queued"}
+
+
+# ---------- customer account views ----------
+@app.get("/orders")
+def my_orders(user: str = Depends(current_user)):
+    return backend.list_orders(user)
+
+
+@app.get("/refunds")
+def my_refunds(user: str = Depends(current_user)):
+    return backend.refund_history(user)
 
 
 # ---------- customer notifications ----------

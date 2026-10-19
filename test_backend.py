@@ -45,4 +45,14 @@ assert backend.check_refund_eligibility("101", "u1")["result"] == "not_eligible"
 # Even skipping the eligibility check, the primary key on refunds.order_id blocks a second payout.
 assert backend.issue_refund("101", "u1") == {"error": "already refunded"}
 assert sorted(backend.refunded_order_ids()) == ["101", "102"]
+
+# ---------- customer views: only your own orders and refunds ----------
+assert [o["order_id"] for o in backend.list_orders("u1")] == ["105", "101", "102", "106"]   # newest first
+assert {o["order_id"] for o in backend.list_orders("u2")} == {"103", "104"}
+assert backend.list_orders("nobody") == []
+refunded = {o["order_id"]: o["refunded_at"] for o in backend.list_orders("u1")}
+assert refunded["101"] and refunded["102"] and refunded["105"] is None
+history = backend.refund_history("u1")
+assert sorted((h["order_id"], h["status"]) for h in history) == [("101", "refunded"), ("102", "refunded")]
+assert backend.refund_history("u2") == []
 print("All policy tests passed.")

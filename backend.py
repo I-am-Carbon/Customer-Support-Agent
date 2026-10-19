@@ -7,7 +7,7 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from db import engine, Order, Refund
+from db import engine, Approval, Order, Refund
 
 AUTO_APPROVE_LIMIT = 5000   # refunds above this need a human
 MIN_DELAY_DAYS = 7          # in-transit orders become refundable after this many days
@@ -87,3 +87,51 @@ def issue_refund(order_id: str, user_id: str, approved: bool = False, today: dat
 def refunded_order_ids() -> list[str]:
     with Session(engine) as s:
         return list(s.scalars(select(Refund.order_id).order_by(Refund.created_at)))
+
+
+# ---------- customer views (read-only, always scoped to one user) ----------
+def list_orders(user_id: str) -> list[dict]:
+    """The user's orders, newest first, each with its refund (if any)."""
+    with Session(engine) as s:
+        rows = s.execute(select(Order, Refund)
+                         .outerjoin(Refund, Refund.order_id == Order.id)
+                         .where(Order.user_id == user_id)
+                         .order_by(Order.ordered.desc(), Order.id.desc())).all()
+        return [{"order_id": o.id, "item": o.item, "amount": o.amount, "status": o.status,
+                 "ordered": str(o.ordered),
+                 "delivered_on": str(o.delivered_on) if o.delivered_on else None,
+                 "address": o.address,
+                 "refunded_at": r.created_at.isoformat() if r else None}
+                for o, r in rows]
+
+
+def refund_history(user_id: str) -> list[dict]:
+    """Every refund the user asked for that got anywhere: paid ones, plus reviews that are
+    pending, rejected or approved-but-not-paid. Newest first."""
+    with Session(engine) as s:
+        paid = s.execute(select(Refund, Order).join(Order, Refund.order_id == Order.id)
+                         .where(Order.user_id == user_id)).all()
+        reviews = s.scalars(select(Approval).where(Approval.user_id == user_id)).all()
+        items = {o.id: o.item for o in s.scalars(select(Order).where(Order.user_id == user_id))}
+
+    approved_by = {a.order_id: a.decided_by for a in reviews if a.status == "approved"}
+    paid_ids = {r.order_id for r, _ in paid}
+    history = [{"order_id": r.order_id, "item": o.item, "amount": r.amount, "status": "refunded",
+                "detail": f"approved by {approved_by[r.order_id]}" if r.order_id in approved_by else "automatic",
+                "at": r.created_at.isoformat()}
+               for r, o in paid]
+    for a in reviews:
+        if a.status == "approved" and a.order_id in paid_ids:
+            continue                                   # already listed as refunded
+        if a.status == "pending":
+            status, detail = "waiting for review", f"reason: {a.reason}"
+        elif a.status == "rejected":
+            status, detail = "rejected", f"rejected by {a.decided_by}"
+        elif a.job_status == "done":                   # approved, but payout refused (e.g. window closed)
+            status, detail = "not paid", f"approved by {a.decided_by}, but the refund was refused"
+        else:
+            status, detail = "processing", f"approved by {a.decided_by}"
+        history.append({"order_id": a.order_id, "item": items.get(a.order_id, "?"), "amount": a.amount,
+                        "status": status, "detail": detail,
+                        "at": (a.decided_at or a.created_at).isoformat()})
+    return sorted(history, key=lambda h: h["at"], reverse=True)
