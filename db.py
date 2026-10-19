@@ -8,7 +8,7 @@ Connection string comes from the DATABASE_URL environment variable.
 """
 import atexit
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
@@ -83,21 +83,26 @@ class Notification(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-SEED_ORDERS = [
-    dict(id="101", user_id="u1", item="Headphones", amount=2000,  status="delivered",  ordered=date(2026, 9, 20), delivered_on=date(2026, 9, 27), address="Bangalore"),
-    dict(id="102", user_id="u1", item="Laptop",     amount=60000, status="in_transit", ordered=date(2026, 9, 15), delivered_on=None,              address="Bangalore"),
-    dict(id="103", user_id="u2", item="Mouse",      amount=800,   status="in_transit", ordered=date(2026, 10, 1), delivered_on=None,              address="Chennai"),
-    dict(id="104", user_id="u2", item="Phone",      amount=9000,  status="delivered",  ordered=date(2026, 9, 25), delivered_on=date(2026, 9, 29), address="Chennai"),
-    dict(id="105", user_id="u1", item="Book",       amount=1200,  status="in_transit", ordered=date(2026, 9, 20), delivered_on=None,              address="Bangalore"),
-    dict(id="106", user_id="u1", item="Shoes",      amount=3000,  status="delivered",  ordered=date(2026, 9, 1),  delivered_on=date(2026, 9, 5),  address="Bangalore"),
-]
+def seed_orders() -> list[dict]:
+    """Dates are relative to the real today, so every reset gives the same situation
+    (103 too early to refund, 106 past the return window, ...) whatever day it is."""
+    def ago(days: int) -> date:
+        return date.today() - timedelta(days=days)
+    return [
+        dict(id="101", user_id="u1", item="Headphones", amount=2000,  status="delivered",  ordered=ago(14), delivered_on=ago(7),  address="Bangalore"),
+        dict(id="102", user_id="u1", item="Laptop",     amount=60000, status="in_transit", ordered=ago(19), delivered_on=None,    address="Bangalore"),
+        dict(id="103", user_id="u2", item="Mouse",      amount=800,   status="in_transit", ordered=ago(3),  delivered_on=None,    address="Chennai"),
+        dict(id="104", user_id="u2", item="Phone",      amount=9000,  status="delivered",  ordered=ago(9),  delivered_on=ago(5),  address="Chennai"),
+        dict(id="105", user_id="u1", item="Book",       amount=1200,  status="in_transit", ordered=ago(14), delivered_on=None,    address="Bangalore"),
+        dict(id="106", user_id="u1", item="Shoes",      amount=3000,  status="delivered",  ordered=ago(33), delivered_on=ago(29), address="Bangalore"),
+    ]
 
 def reset_db():
     """Recreate the business tables with the seed orders. Checkpoints are left alone."""
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
     with Session(engine) as s, s.begin():
-        s.add_all([Order(**row) for row in SEED_ORDERS])
+        s.add_all([Order(**row) for row in seed_orders()])
         for table in Base.metadata.tables:
             s.execute(text(RLS.format(table)))
 
@@ -129,7 +134,7 @@ def init_db():
         # close earlier than the truth, never later).
         s.execute(text("UPDATE orders SET delivered_on = ordered WHERE status = 'delivered' AND delivered_on IS NULL"))
         if s.query(Order).first() is None:
-            s.add_all([Order(**row) for row in SEED_ORDERS])
+            s.add_all([Order(**row) for row in seed_orders()])
         for table in Base.metadata.tables:
             s.execute(text(RLS.format(table)))
     make_checkpointer()   # runs PostgresSaver.setup() once, before api and worker start

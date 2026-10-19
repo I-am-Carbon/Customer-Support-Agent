@@ -91,10 +91,20 @@ flowchart LR
 The same rules run twice: once when the agent asks, and again inside `issue_refund` at
 payout, so no caller can skip them.
 
-Seed orders: `u1` has 101 (₹2,000, delivered 27 Sep), 102 (₹60,000, in transit),
-105 (₹1,200, in transit), 106 (₹3,000, delivered 5 Sep, outside the window); `u2` has
-103 (₹800, in transit 3 days), 104 (₹9,000, delivered 29 Sep). The app's "today" is fixed at
-2026-10-04 so results are reproducible.
+The rules use the real date. Seed orders are dated relative to the day you reset the data,
+so the demo behaves the same whenever you run it:
+
+| Order | Customer | Amount | State on reset | Refund request |
+|---|---|---|---|---|
+| 101 Headphones | u1 | ₹2,000 | delivered 7 days ago | issued immediately |
+| 102 Laptop | u1 | ₹60,000 | in transit, ordered 19 days ago | needs approval |
+| 103 Mouse | u2 | ₹800 | in transit, ordered 3 days ago | denied: too early |
+| 104 Phone | u2 | ₹9,000 | delivered 5 days ago | needs approval |
+| 105 Book | u1 | ₹1,200 | in transit, ordered 14 days ago | issued immediately |
+| 106 Shoes | u1 | ₹3,000 | delivered 29 days ago | denied: return window closed |
+
+Because the dates only move relative to the last reset, an order drifts as days pass (101
+leaves its window 3 days after a reset). Run `python db.py` to reset.
 
 ## Setup
 

@@ -9,8 +9,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from db import engine, Order, Refund
 
-TODAY = date(2026, 10, 4)   # fixed date so tests give the same result every run
-
 AUTO_APPROVE_LIMIT = 5000   # refunds above this need a human
 MIN_DELAY_DAYS = 7          # in-transit orders become refundable after this many days
 RETURN_WINDOW_DAYS = 10     # delivered orders are refundable for this many days after delivery
@@ -58,15 +56,15 @@ def _refund_rules(s: Session, order: Order, today: date) -> dict:
     return {"result": "eligible", "amount": order.amount}
 
 
-def check_refund_eligibility(order_id: str, user_id: str, today: date = TODAY) -> dict:
+def check_refund_eligibility(order_id: str, user_id: str, today: date | None = None) -> dict:
     with Session(engine) as s:
         order = _find_order(s, order_id, user_id)
         if order is None:
             return {"result": "not_eligible", "reason": "order not found"}
-        return _refund_rules(s, order, today)
+        return _refund_rules(s, order, today or date.today())
 
 
-def issue_refund(order_id: str, user_id: str, approved: bool = False, today: date = TODAY) -> dict:
+def issue_refund(order_id: str, user_id: str, approved: bool = False, today: date | None = None) -> dict:
     """Pay out. Every rule is checked again here, so money can't move even if a caller
     skips check_refund_eligibility. approved=True only after a human said yes."""
     try:
@@ -74,7 +72,7 @@ def issue_refund(order_id: str, user_id: str, approved: bool = False, today: dat
             order = _find_order(s, order_id, user_id)
             if order is None:
                 return {"error": "order not found"}
-            check = _refund_rules(s, order, today)
+            check = _refund_rules(s, order, today or date.today())
             if check["result"] == "not_eligible":
                 return {"error": check["reason"]}
             if check["result"] == "needs_approval" and not approved:

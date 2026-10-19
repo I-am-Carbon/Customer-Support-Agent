@@ -1,6 +1,6 @@
 """Policy tests against Postgres (DATABASE_URL). No LLM needed. Run: python test_backend.py
 WARNING: resets the orders/refunds tables."""
-from datetime import date
+from datetime import date, timedelta
 import backend
 import db
 
@@ -13,12 +13,14 @@ assert backend.check_refund_eligibility("103", "u2")["result"] == "not_eligible"
 assert backend.check_refund_eligibility("999", "u1")["result"] == "not_eligible"     # doesn't exist
 assert "error" in backend.update_address("101", "Delhi", "u1")                       # already delivered
 
-# ---------- return window: delivered orders, 10 days after delivery (TODAY is 2026-10-04) ----------
+# ---------- return window: delivered orders, 10 days after delivery ----------
+# Seed dates are relative to today: 101 was delivered 7 days ago, 106 29 days ago.
+later = lambda days: date.today() + timedelta(days=days)
 assert backend.check_refund_eligibility("106", "u1")["result"] == "not_eligible"     # delivered 29 days ago
 assert "return window" in backend.check_refund_eligibility("106", "u1")["reason"]
-assert backend.check_refund_eligibility("101", "u1", today=date(2026, 10, 7))["result"] == "eligible"      # day 10: last day
-assert backend.check_refund_eligibility("101", "u1", today=date(2026, 10, 8))["result"] == "not_eligible"  # day 11
-assert backend.check_refund_eligibility("102", "u1", today=date(2027, 1, 1))["result"] == "needs_approval" # in transit: no window
+assert backend.check_refund_eligibility("101", "u1", today=later(3))["result"] == "eligible"       # day 10: last day
+assert backend.check_refund_eligibility("101", "u1", today=later(4))["result"] == "not_eligible"   # day 11
+assert backend.check_refund_eligibility("102", "u1", today=later(100))["result"] == "needs_approval" # in transit: no window
 
 # ---------- issue_refund re-checks every rule, even if the caller skipped the check ----------
 assert backend.issue_refund("106", "u1")["error"].startswith("the 10-day return window closed")
