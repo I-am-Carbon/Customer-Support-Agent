@@ -63,6 +63,22 @@ class Approval(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     decided_by: Mapped[str | None] = mapped_column(String)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Background processing by the Celery worker: queued / done / failed
+    job_status: Mapped[str | None] = mapped_column(String)
+    job_error: Mapped[str | None] = mapped_column(String)
+
+class Notification(Base):
+    """Outbox row: written once per decision, then delivered (with retries) by the worker."""
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # unique: a re-run of the decision job can't create a second notification
+    approval_id: Mapped[str] = mapped_column(ForeignKey("approvals.id"), unique=True)
+    user_id: Mapped[str] = mapped_column(String, index=True)
+    message: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String, default="pending")   # pending / sent / failed
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 SEED_ORDERS = [

@@ -3,11 +3,13 @@ HTTP API around the multi-agent graph.
 
   POST /chat              a customer sends a message (rate limited per user, in Redis)
   GET  /approvals         reviewers list refunds waiting for a human
-  POST /approvals/{id}    a reviewer approves or rejects; the paused graph resumes
+  POST /approvals/{id}    a reviewer approves or rejects; the Celery worker resumes the
+                          paused graph (pays out on approve) and notifies the customer
+  GET  /notifications     a customer reads their notifications
 
 Auth is a stand-in: the X-User-Id header. In production it comes from a verified
 session or JWT, never from something the client can set freely.
-Run: uvicorn api:app   (needs DATABASE_URL, REDIS_URL, GROQ_API_KEY)
+Run: uvicorn api:app   (needs DATABASE_URL, REDIS_URL, GROQ_API_KEY), plus the worker (see worker.py)
 """
 import logging
 import math
@@ -18,12 +20,12 @@ from typing import Literal
 import redis
 from fastapi import Depends, FastAPI, Header, HTTPException
 from langchain_core.messages import HumanMessage
-from langgraph.types import Command
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
-from db import Approval, engine
+from db import Approval, Notification, engine
 from graph import graph
+from worker import process_decision
 
 REVIEWERS = {"admin"}   # users allowed to approve refunds
 RATE_LIMIT = 5          # /chat requests per user...
@@ -113,18 +115,18 @@ def list_approvals(_: str = Depends(reviewer)):
 class DecisionIn(BaseModel):
     decision: Literal["approve", "reject"]
 
-@app.post("/approvals/{approval_id}")
+@app.post("/approvals/{approval_id}", status_code=202)
 def decide(approval_id: str, body: DecisionIn, reviewer_id: str = Depends(reviewer)):
     status = "approved" if body.decision == "approve" else "rejected"
 
     # Claim it atomically: only one reviewer can move it out of "pending", even if two
-    # click at the same moment. The loser gets 409, so the graph is resumed exactly once.
+    # click at the same moment. The loser gets 409, so only one job is ever queued.
     with Session(engine) as s, s.begin():
         claimed = s.execute(
             update(Approval)
             .where(Approval.id == approval_id, Approval.status == "pending")
-            .values(status=status, decided_by=reviewer_id, decided_at=func.now())
-            .returning(Approval.thread_id, Approval.user_id)
+            .values(status=status, decided_by=reviewer_id, decided_at=func.now(), job_status="queued")
+            .returning(Approval.id)
         ).first()
         if claimed is None:
             if s.get(Approval, approval_id) is None:
@@ -132,12 +134,22 @@ def decide(approval_id: str, body: DecisionIn, reviewer_id: str = Depends(review
             raise HTTPException(409, "already decided")
 
     try:
-        # Resume as the CUSTOMER: the refund tool checks ownership against their user_id.
-        result = graph.invoke(Command(resume=body.decision), config_for(claimed.thread_id, claimed.user_id))
+        process_decision.delay(approval_id)   # the worker resumes the graph and notifies
     except Exception:
-        with Session(engine) as s, s.begin():   # put it back so it can be retried
+        # Broker unreachable: undo the claim so the reviewer can simply try again.
+        with Session(engine) as s, s.begin():
             s.execute(update(Approval).where(Approval.id == approval_id)
-                      .values(status="pending", decided_by=None, decided_at=None))
-        raise
+                      .values(status="pending", decided_by=None, decided_at=None, job_status=None))
+        raise HTTPException(503, "could not queue the decision, try again")
 
-    return {"id": approval_id, "status": status, "reply": result["messages"][-1].content}
+    return {"id": approval_id, "status": status, "job_status": "queued"}
+
+
+# ---------- customer notifications ----------
+@app.get("/notifications")
+def list_notifications(user: str = Depends(current_user)):
+    with Session(engine) as s:
+        rows = s.scalars(select(Notification)
+                         .where(Notification.user_id == user, Notification.status == "sent")
+                         .order_by(Notification.created_at))
+        return [{"id": n.id, "message": n.message, "sent_at": n.sent_at} for n in rows]

@@ -1,7 +1,9 @@
 """
 API tests through FastAPI's TestClient, against the real Postgres, Redis and LLM.
 Run from the project root: python -m tests.test_api
-WARNING: resets the orders/refunds/approvals tables.
+Celery runs in eager mode here (tasks execute inline), so no worker process is needed.
+The real worker is tested in tests/test_worker.py.
+WARNING: resets the orders/refunds/approvals/notifications tables.
 """
 import uuid
 import redis
@@ -12,7 +14,9 @@ from sqlalchemy.orm import Session
 import api
 import backend
 import db
+import worker
 
+worker.celery.conf.task_always_eager = True
 db.reset_db()
 client = TestClient(api.app)
 
@@ -75,7 +79,7 @@ assert r.status_code == 409                                                # pau
 assert backend.refunded_order_ids() == []                                  # nothing paid before approval
 
 r = client.post(f"/approvals/{approval_id}", json={"decision": "approve"}, headers=as_user("admin"))
-assert r.status_code == 200 and r.json()["status"] == "approved", r.text
+assert r.status_code == 202 and r.json()["status"] == "approved", r.text
 assert backend.refunded_order_ids() == ["102"]
 assert client.get("/approvals", headers=as_user("admin")).json() == []
 assert client.post(f"/approvals/{approval_id}", json={"decision": "approve"},
@@ -91,12 +95,18 @@ assert r.status_code == 200 and r.json()["status"] == "done"               # thr
 r = client.post("/chat", json={"message": "Refund order 104, wrong size"}, headers=as_user("u2")).json()
 assert r["status"] == "pending_approval", r
 r = client.post(f"/approvals/{r['approval_id']}", json={"decision": "reject"}, headers=as_user("admin"))
-assert r.status_code == 200 and r.json()["status"] == "rejected"
+assert r.status_code == 202 and r.json()["status"] == "rejected"
 assert backend.refunded_order_ids() == ["102"]                             # still only 102
 
 with Session(db.engine) as s:                                              # audit trail
     rows = s.scalars(select(db.Approval).order_by(db.Approval.created_at)).all()
     assert [(a.order_id, a.status, a.decided_by) for a in rows] == [("102", "approved", "admin"),
                                                                    ("104", "rejected", "admin")]
-    assert all(a.decided_at for a in rows)
+    assert all(a.decided_at for a in rows) and all(a.job_status == "done" for a in rows)
+
+# Customers see their own notifications only.
+u1_notes = client.get("/notifications", headers=as_user("u1")).json()
+u2_notes = client.get("/notifications", headers=as_user("u2")).json()
+assert len(u1_notes) == 1 and "order 102" in u1_notes[0]["message"], u1_notes
+assert len(u2_notes) == 1 and "order 104" in u2_notes[0]["message"], u2_notes
 print("approval flow tests passed.")
